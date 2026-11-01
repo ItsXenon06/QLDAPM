@@ -1,5 +1,7 @@
 package com.xenon.qldapm.config;
 
+import com.xenon.qldapm.security.SessionRevocationFilter;
+import com.xenon.qldapm.security.SessionRevocationService;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -11,6 +13,7 @@ import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
+import org.springframework.security.web.context.SecurityContextHolderFilter;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 
@@ -19,18 +22,20 @@ import java.io.IOException;
 /**
  * Xác thực theo session (phù hợp web POS HTML/JS thuần cùng origin).
  * Phân quyền: @PreAuthorize("hasAuthority('KHO_NHAP')") trên controller/service.
+ * SessionRevocationFilter: đổi vai trò/khóa/xóa tài khoản có hiệu lực ngay (không chờ hết session 8h).
  */
 @Configuration
 @EnableMethodSecurity
 public class SecurityConfig {
 
     @Bean
-    SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain filterChain(HttpSecurity http, SessionRevocationService revocation) throws Exception {
         http
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
                         .ignoringRequestMatchers("/api/auth/login"))
+                .addFilterAfter(new SessionRevocationFilter(revocation), SecurityContextHolderFilter.class)
                 .addFilterAfter(new CsrfCookieFilter(), BasicAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers("/api/auth/login").permitAll()

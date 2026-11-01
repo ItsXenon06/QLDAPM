@@ -41,8 +41,8 @@ public class KhoController {
 
     @GetMapping("/serial")
     @PreAuthorize("hasAuthority('KHO_XEM_TON')")
-    public PageResponse<SerialResponse> serials(@RequestParam Integer maSanPham,
-                                                @RequestParam(defaultValue = "trong_kho") String trangThai,
+    public PageResponse<SerialResponse> serials(@RequestParam(required = false) Integer maSanPham,
+                                                @RequestParam(required = false) String trangThai,
                                                 @RequestParam(defaultValue = "0") int page,
                                                 @RequestParam(defaultValue = "50") int size) {
         return service.timSerial(maSanPham, trangThai,

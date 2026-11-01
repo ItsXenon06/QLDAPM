@@ -31,6 +31,10 @@ public interface SerialSanPhamRepository extends JpaRepository<SerialSanPham, In
 
     Page<SerialSanPham> findBySanPham_MaSanPhamAndTrangThai(Integer maSanPham, String trangThai, Pageable pageable);
 
+    @Query("select s from SerialSanPham s where (:product is null or s.sanPham.maSanPham = :product) "
+            + "and (:status is null or s.trangThai = :status)")
+    Page<SerialSanPham> search(@Param("product") Integer product, @Param("status") String status, Pageable pageable);
+
     long countBySanPham_MaSanPhamAndTrangThai(Integer maSanPham, String trangThai);
 
     /** Báo cáo hàng tồn lâu ngày. */

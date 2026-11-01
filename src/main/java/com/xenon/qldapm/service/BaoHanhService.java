@@ -45,6 +45,8 @@ public class BaoHanhService {
             "tu_choi", Set.of("da_tra_khach"),
             "da_tra_khach", Set.of());
 
+    private final InventoryCountGuard inventoryCountGuard;
+
     private final BaoHanhRepository baoHanhRepository;
     private final YeuCauBaoHanhRepository yeuCauRepository;
     private final ChinhSachBaoHanhRepository chinhSachRepository;
@@ -131,6 +133,7 @@ public class BaoHanhService {
 
     @Transactional
     public YeuCauResponse tiepNhan(TiepNhanRequest r, String ip) {
+        inventoryCountGuard.stockMovement();
         TaiKhoanUserDetails u = CurrentUser.require();
         BaoHanh chon = baoHanhRepository.findById(r.maBaoHanh())
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy thông tin bảo hành"));
@@ -187,6 +190,7 @@ public class BaoHanhService {
 
     @Transactional
     public YeuCauResponse capNhat(Integer id, CapNhatYeuCauRequest r, String ip) {
+        inventoryCountGuard.stockMovement();
         TaiKhoanUserDetails u = CurrentUser.require();
         YeuCauBaoHanh y = yeuCauRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy yêu cầu bảo hành"));

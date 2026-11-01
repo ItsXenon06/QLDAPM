@@ -45,6 +45,8 @@ public class PosService {
     private static final List<String> NHAP = List.of("dang_lap", "tam_giu");
     private static final Set<String> PHUONG_THUC = Set.of("tien_mat", "the_ngan_hang", "qr_chuyen_khoan", "tra_gop");
 
+    private final InventoryCountGuard inventoryCountGuard;
+
     private final HoaDonRepository hoaDonRepository;
     private final ChiTietHoaDonRepository chiTietRepository;
     private final QuayPOSRepository quayRepository;
@@ -67,6 +69,7 @@ public class PosService {
 
     @Transactional
     public HoaDonResponse tao(TaoHoaDonRequest r, String ip) {
+        inventoryCountGuard.cashier(CurrentUser.require().getMaNhanVien());
         TaiKhoanUserDetails u = CurrentUser.require();
         QuayPOS quay = r.maQuay() != null
                 ? quayRepository.findById(r.maQuay()).orElseThrow(() -> new NotFoundException("Không tìm thấy quầy"))
@@ -243,6 +246,7 @@ public class PosService {
 
     @Transactional
     public HoaDonResponse tiepTuc(Integer id) {
+        inventoryCountGuard.cashier(CurrentUser.require().getMaNhanVien());
         HoaDon h = layCuaToi(id, "tam_giu");
         if (!hoaDonRepository.findByThuNgan_MaNhanVienAndTrangThai(h.getThuNgan().getMaNhanVien(), "dang_lap").isEmpty()) {
             throw BusinessException.conflict("DANG_CO_HOA_DON_DANG_LAP", "Hãy xử lý hóa đơn đang lập trước khi mở lại hóa đơn tạm giữ");
@@ -262,17 +266,14 @@ public class PosService {
     // ===================== thanh toán =====================
 
     @Transactional
-    public HoaDonResponse thanhToan(Integer id, ThanhToanRequest r) {
-        TaiKhoanUserDetails u = CurrentUser.require();
+    public HoaDonResponse dinhGia(Integer id) {
         HoaDon h = layCuaToi(id, "dang_lap");
-        if (dongHieuLuc(h).isEmpty()) throw BusinessException.badRequest("HOA_DON_TRONG", "Hóa đơn chưa có hàng");
+        dinhGiaLai(h);
+        hoaDonRepository.flush();
+        return toResponse(h, true);
+    }
 
-        QuayPOS quay = quayRepository.findByIdForUpdate(h.getQuay().getMaQuay())
-                .orElseThrow(() -> new NotFoundException("Không tìm thấy quầy"));
-        if (!"hoat_dong".equals(quay.getTrangThai())) {
-            throw BusinessException.conflict("QUAY_KHONG_HOAT_DONG", "Quầy không còn hoạt động");
-        }
-
+    private void dinhGiaLai(HoaDon h) {
         // 1. định giá lại theo giá hiện hành (bỏ qua quà tặng), tính lại khuyến mãi, kiểm tra giá sàn phần giảm tay
         for (ChiTietHoaDon c : dongHieuLuc(h)) {
             if (Boolean.TRUE.equals(c.getLaQuaTang())) continue;
@@ -293,6 +294,25 @@ public class PosService {
         tinhLai(h);
         BigDecimal canTra = h.getTongTienHang().subtract(h.getTongGiamGia());
         if (canTra.signum() <= 0) throw BusinessException.badRequest("TONG_TIEN_KHONG_HOP_LE", "Số tiền phải trả phải lớn hơn 0");
+
+    }
+
+    @Transactional
+    public HoaDonResponse thanhToan(Integer id, ThanhToanRequest r) {
+        inventoryCountGuard.stockMovement();
+        TaiKhoanUserDetails u = CurrentUser.require();
+        HoaDon h = layCuaToi(id, "dang_lap");
+        if (dongHieuLuc(h).isEmpty()) throw BusinessException.badRequest("HOA_DON_TRONG", "Hóa đơn chưa có hàng");
+
+        QuayPOS quay = quayRepository.findByIdForUpdate(h.getQuay().getMaQuay())
+                .orElseThrow(() -> new NotFoundException("Không tìm thấy quầy"));
+        if (!"hoat_dong".equals(quay.getTrangThai())) {
+            throw BusinessException.conflict("QUAY_KHONG_HOAT_DONG", "Quầy không còn hoạt động");
+        }
+
+        dinhGiaLai(h);
+        List<ChiTietHoaDon> dongs = dongHieuLuc(h);
+        BigDecimal canTra = h.getTongTienHang().subtract(h.getTongGiamGia());
 
         // 2. kiểm tra các khoản thanh toán
         BigDecimal tong = BigDecimal.ZERO;
@@ -357,7 +377,7 @@ public class PosService {
         }
 
         // 6. cấp số hóa đơn, chốt
-        String prefix = "HD-" + quay.getMaQuayCode().replaceAll("[^A-Za-z0-9]", "").toUpperCase()
+        String prefix = "HD-" + quay.getMaQuay()
                 + "-" + now.toLocalDate().format(DateTimeFormatter.BASIC_ISO_DATE) + "-";
         long stt = hoaDonRepository.countBySoHoaDonStartingWith(prefix) + 1;
         String so = prefix + String.format("%04d", stt);
@@ -384,6 +404,7 @@ public class PosService {
     /** Chỉ hủy trong cùng ngày thanh toán và khi chưa có phiếu trả; hóa đơn cũ hơn dùng chức năng trả hàng. */
     @Transactional
     public HoaDonResponse huyHoaDon(Integer id, String lyDo, String ip) {
+        inventoryCountGuard.stockMovement();
         TaiKhoanUserDetails u = CurrentUser.require();
         HoaDon h = hoaDonRepository.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("Không tìm thấy hóa đơn"));
         if (!"da_thanh_toan".equals(h.getTrangThai())) {
@@ -589,7 +610,9 @@ public class PosService {
                 return new DongHoaDonResponse(c.getMaChiTiet(), c.getSanPham().getMaSanPham(), c.getMaSKU(), c.getTenHang(),
                         c.getSerial() == null ? null : c.getSerial().getMaSerial(),
                         c.getSerial() == null ? null : c.getSerial().getSoSerial(),
-                        c.getSoLuong(), c.getDonGia(), c.getGiamGia(), gross.subtract(c.getGiamGia()), c.getThueSuat(),
+                        c.getSoLuong(), c.getDonGia(), c.getGiamGia(),
+                        c.getGiamGia().subtract(khuyenMai.tongKhuyenMaiDong(c)).max(BigDecimal.ZERO),
+                        gross.subtract(c.getGiamGia()), c.getThueSuat(),
                         tienThue(c, gross), c.getSanPham().getBaoHanhThang(), c.getHieuLuc(), c.getLaQuaTang());
             }).toList();
             tts = h.getMaHoaDon() == null ? List.of() : thanhToanRepository.findByHoaDon_MaHoaDon(h.getMaHoaDon()).stream()

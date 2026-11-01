@@ -23,6 +23,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class TonKhoService {
 
+    private final InventoryCountGuard inventoryCountGuard;
+
     private final TonKhoRepository tonKhoRepository;
     private final LichSuTonKhoRepository lichSuTonKhoRepository;
     private final SerialSanPhamRepository serialRepository;
@@ -34,6 +36,7 @@ public class TonKhoService {
     @Transactional(propagation = Propagation.MANDATORY)
     public TonKho dieuChinh(Integer maSanPham, int delta, String loaiBienDong, String loaiTaiLieu,
                             Integer maTaiLieu, Integer maNhanVien, String ghiChu) {
+        inventoryCountGuard.checkProduct(maSanPham, loaiTaiLieu, maTaiLieu);
         if (delta == 0) {
             throw BusinessException.badRequest("SO_LUONG_KHONG_HOP_LE", "Số lượng biến động phải khác 0");
         }
@@ -62,6 +65,7 @@ public class TonKhoService {
     @Transactional(propagation = Propagation.MANDATORY)
     public void ghiLichSuSerial(SerialSanPham s, String cu, String moi, String loaiTaiLieu, Integer maTaiLieu,
                                 Integer maNhanVien, String ghiChu) {
+        inventoryCountGuard.checkProduct(s.getSanPham().getMaSanPham(), loaiTaiLieu, maTaiLieu);
         LichSuSerial ls = new LichSuSerial();
         ls.setSerial(s);
         ls.setTrangThaiCu(cu);
@@ -124,7 +128,7 @@ public class TonKhoService {
     @Transactional(readOnly = true)
     public PageResponse<SerialResponse> timSerial(Integer maSanPham, String trangThai, Pageable pageable) {
         return PageResponse.of(serialRepository
-                .findBySanPham_MaSanPhamAndTrangThai(maSanPham, trangThai, pageable)
+                .search(maSanPham, trangThai == null || trangThai.isBlank() ? null : trangThai, pageable)
                 .map(TonKhoService::toSerialResponse));
     }
 

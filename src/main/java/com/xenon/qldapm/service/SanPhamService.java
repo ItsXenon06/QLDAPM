@@ -27,6 +27,8 @@ public class SanPhamService {
 
     private static final Set<String> TRANG_THAI = Set.of("dang_kinh_doanh", "ngung_kinh_doanh");
 
+    private final InventoryCountGuard inventoryCountGuard;
+
     private final SanPhamRepository sanPhamRepository;
     private final DanhMucRepository danhMucRepository;
     private final ThuongHieuRepository thuongHieuRepository;
@@ -103,6 +105,7 @@ public class SanPhamService {
 
     @Transactional
     public SanPhamResponse capNhat(Integer id, SanPhamCapNhatRequest r) {
+        inventoryCountGuard.stockMovement();
         SanPham sp = layChuaXoa(id);
         String sku = r.maSKU().trim();
         String vach = blankToNull(r.maVach());
@@ -115,6 +118,9 @@ public class SanPhamService {
         }
         if (!TRANG_THAI.contains(r.trangThai())) {
             throw BusinessException.badRequest("TRANG_THAI_KHONG_HOP_LE", "Trạng thái không hợp lệ");
+        }
+        if (!r.coTheoDoiSerial().equals(sp.getCoTheoDoiSerial())) {
+            inventoryCountGuard.checkProduct(id, null, null);
         }
         if (!r.coTheoDoiSerial().equals(sp.getCoTheoDoiSerial()) && slTon(id) > 0) {
             throw BusinessException.conflict("DOI_THEO_DOI_SERIAL",

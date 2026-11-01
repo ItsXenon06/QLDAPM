@@ -114,6 +114,10 @@ public class PosController {
 
     // ---------- thanh toán / in / hủy ----------
 
+    @PostMapping("/{id}/dinh-gia")
+    @PreAuthorize("hasAuthority('POS_BAN_HANG')")
+    public HoaDonResponse dinhGia(@PathVariable Integer id) { return service.dinhGia(id); }
+
     @PostMapping("/{id}/thanh-toan")
     @PreAuthorize("hasAuthority('POS_BAN_HANG')")
     public HoaDonResponse thanhToan(@PathVariable Integer id, @Valid @RequestBody ThanhToanRequest r) {

@@ -30,7 +30,7 @@ public final class KhuyenMaiDtos {
             Boolean tuDongApDung, Boolean choPhepCongDon, Integer doUuTien, Boolean apDungToanBo,
             @Min(1) Integer soLuongToiDa,
             @NotNull LocalDateTime ngayBatDau, @NotNull LocalDateTime ngayKetThuc,
-            @Size(max = 2000) String moTa, @Valid List<KhuyenMaiItemRequest> items) {}
+            @Size(max = 2000) String moTa, List<@Valid KhuyenMaiItemRequest> items) {}
 
     public record TrangThaiKmRequest(@NotBlank String trangThai) {}
 

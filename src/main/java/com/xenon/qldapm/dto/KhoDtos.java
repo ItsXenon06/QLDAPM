@@ -63,15 +63,15 @@ public final class KhoDtos {
     // ===== Nhập kho =====
     public record PhieuNhapRequest(@NotNull Integer maNCC, @Size(max = 50) String soChungTuNCC,
                                    LocalDateTime ngayDuKien, @Size(max = 500) String ghiChu,
-                                   @NotEmpty @Valid List<DongNhapRequest> chiTiets) {}
+                                   @NotEmpty List<@Valid DongNhapRequest> chiTiets) {}
     public record DongNhapRequest(@NotNull Integer maSanPham, @NotNull @Min(1) Integer slDatHang,
                                   @NotNull @DecimalMin(value = "0", inclusive = false) BigDecimal giaNhap,
                                   @DecimalMin("0") @DecimalMax("100") BigDecimal chietKhauPhanTram,
                                   @DecimalMin("0") @DecimalMax("100") BigDecimal thueSuat) {}
 
-    public record NhanHangRequest(@NotEmpty @Valid List<DongNhanRequest> dongs) {}
+    public record NhanHangRequest(@NotEmpty List<@Valid DongNhanRequest> dongs) {}
     public record DongNhanRequest(@NotNull Integer maChiTiet, @NotNull @Min(1) Integer soLuong,
-                                  @Valid List<SerialInput> serials) {}
+                                  List<@Valid SerialInput> serials) {}
     public record SerialInput(@NotBlank @Size(max = 100) String soSerial, @Size(max = 15) String imei,
                               @Size(max = 15) String imei2) {}
 
@@ -101,9 +101,9 @@ public final class KhoDtos {
 
     // ===== Kiểm kê =====
     public record KiemKeRequest(@Size(max = 500) String ghiChu, List<Integer> maSanPhams) {}
-    public record KiemKeKetQuaRequest(@NotEmpty @Valid List<DongKiemKeRequest> dongs) {}
+    public record KiemKeKetQuaRequest(@NotEmpty List<@Valid DongKiemKeRequest> dongs) {}
     public record DongKiemKeRequest(@NotNull Integer maChiTiet, @Min(0) Integer slThucTe,
-                                    @Size(max = 255) String lyDoChenhLech, @Valid List<SerialKiemRequest> serials) {}
+                                    @Size(max = 255) String lyDoChenhLech, List<@Valid SerialKiemRequest> serials) {}
     public record SerialKiemRequest(@NotNull Integer maSerial, @NotNull Boolean timThay, @Size(max = 255) String ghiChu) {}
 
     public record KiemKeResponse(Integer maPhieuKiemKe, String maSoPhieu, String trangThai, String nguoiLap,

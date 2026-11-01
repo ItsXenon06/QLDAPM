@@ -20,7 +20,7 @@ public final class PosDtos {
     public record GanKhachRequest(Integer maKhachHang) {}
     public record HuyHoaDonRequest(@NotBlank @Size(max = 255) String lyDo) {}
 
-    public record ThanhToanRequest(@NotEmpty @Size(max = 4) @Valid List<DongThanhToanRequest> thanhToans) {}
+    public record ThanhToanRequest(@NotEmpty @Size(max = 4) List<@Valid DongThanhToanRequest> thanhToans) {}
     public record DongThanhToanRequest(@NotBlank String phuongThuc,
                                        @NotNull @DecimalMin(value = "0", inclusive = false) BigDecimal soTien,
                                        @DecimalMin("0") BigDecimal tienKhachDua,
@@ -36,7 +36,7 @@ public final class PosDtos {
                                  List<KhuyenMaiDtos.KmApDungResponse> khuyenMais) {}
     public record DongHoaDonResponse(Integer maChiTiet, Integer maSanPham, String maSKU, String tenHang,
                                      Integer maSerial, String soSerial, Integer soLuong, BigDecimal donGia,
-                                     BigDecimal giamGia, BigDecimal thanhTien, BigDecimal thueSuat, BigDecimal tienThue,
+                                     BigDecimal giamGia, BigDecimal giamGiaTay, BigDecimal thanhTien, BigDecimal thueSuat, BigDecimal tienThue,
                                      Integer baoHanhThang, Boolean hieuLuc, Boolean laQuaTang) {}
     public record ThanhToanResponse(String phuongThuc, String trangThai, BigDecimal soTien, BigDecimal tienKhachDua,
                                     BigDecimal tienThoiLai, String maThamChieu, String donViTraGop, Integer soKyHan,
@@ -44,7 +44,7 @@ public final class PosDtos {
 
     // ===== Trả hàng =====
     public record TaoPhieuTraRequest(@NotNull Integer maHoaDon, @NotBlank @Size(max = 500) String lyDo,
-                                     @NotBlank String phuongThucHoan, @NotEmpty @Valid List<DongTraRequest> chiTiets) {}
+                                     @NotBlank String phuongThucHoan, @NotEmpty List<@Valid DongTraRequest> chiTiets) {}
     public record DongTraRequest(@NotNull Integer maChiTietHD, @NotNull @Min(1) Integer soLuong,
                                  @NotBlank String tinhTrangHang, @Size(max = 255) String ghiChu) {}
     public record TuChoiRequest(@NotBlank @Size(max = 255) String lyDo) {}

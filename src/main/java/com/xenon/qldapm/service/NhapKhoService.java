@@ -32,6 +32,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class NhapKhoService {
 
+    private final InventoryCountGuard inventoryCountGuard;
+
     private final PhieuNhapKhoRepository phieuRepository;
     private final NhaCungCapRepository nhaCungCapRepository;
     private final SanPhamRepository sanPhamRepository;
@@ -76,6 +78,7 @@ public class NhapKhoService {
 
     @Transactional
     public PhieuNhapResponse nhanHang(Integer id, NhanHangRequest r) {
+        inventoryCountGuard.stockMovement();
         TaiKhoanUserDetails u = CurrentUser.require();
         PhieuNhapKho p = phieuRepository.findByIdForUpdate(id)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy phiếu nhập"));

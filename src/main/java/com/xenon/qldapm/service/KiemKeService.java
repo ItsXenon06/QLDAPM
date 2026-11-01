@@ -22,15 +22,16 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 /**
- * Kiểm kê: dang_kiem -> hoan_thanh | huy.
- * Quy tắc: chỉ 1 phiếu đang kiểm tại một thời điểm; chụp tồn hệ thống lúc tạo; phải đếm đủ mọi dòng mới hoàn thành;
- * dòng lệch bắt buộc có lý do; điều chỉnh theo CHÊNH LỆCH (không ghi đè) để không xóa các giao dịch phát sinh
- * sau lúc chụp. Hàng Serial: serial không tìm thấy => 'mat' (nếu còn 'trong_kho'), tồn giảm đúng số serial mất.
- * Mọi điều chỉnh ghi sổ cái tồn kho + nhật ký hệ thống.
+ * One open stocktake per store. Selected products are frozen until completion/cancellation.
+ * Transaction-scoped SQL Server application locks stabilize the opening snapshot and
+ * exclude concurrent stock movements while a count is being created or finalized.
+ * Missing serialized items become lost; discrepancy reasons and audit history are mandatory.
  */
 @Service
 @RequiredArgsConstructor
 public class KiemKeService {
+
+    private final InventoryCountGuard inventoryCountGuard;
 
     private final PhieuKiemKeRepository phieuRepository;
     private final ChiTietKiemKeSerialRepository ctSerialRepository;
@@ -43,6 +44,7 @@ public class KiemKeService {
 
     @Transactional
     public KiemKeResponse tao(KiemKeRequest r) {
+        inventoryCountGuard.stocktake();
         TaiKhoanUserDetails u = CurrentUser.require();
         if (phieuRepository.findByTrangThai("dang_kiem", PageRequest.of(0, 1)).hasContent()) {
             throw BusinessException.conflict("DANG_CO_PHIEU_KIEM", "Đang có phiếu kiểm kê chưa hoàn thành");
@@ -93,6 +95,7 @@ public class KiemKeService {
 
     @Transactional
     public KiemKeResponse nhapKetQua(Integer id, KiemKeKetQuaRequest r) {
+        inventoryCountGuard.stocktake();
         PhieuKiemKe p = layDangKiem(id);
         Map<Integer, ChiTietKiemKe> theoId = p.getChiTiets().stream()
                 .collect(Collectors.toMap(ChiTietKiemKe::getMaChiTiet, c -> c));
@@ -124,6 +127,7 @@ public class KiemKeService {
 
     @Transactional
     public KiemKeResponse hoanThanh(Integer id, String ip) {
+        inventoryCountGuard.stocktake();
         TaiKhoanUserDetails u = CurrentUser.require();
         PhieuKiemKe p = layDangKiem(id);
 
@@ -173,6 +177,7 @@ public class KiemKeService {
 
     @Transactional
     public KiemKeResponse huy(Integer id) {
+        inventoryCountGuard.stocktake();
         PhieuKiemKe p = layDangKiem(id);
         p.setTrangThai("huy");
         return toResponse(p, true);

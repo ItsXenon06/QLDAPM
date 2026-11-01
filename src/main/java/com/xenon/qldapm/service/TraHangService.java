@@ -48,6 +48,8 @@ public class TraHangService {
             "da_mo", BigDecimal.TEN, "thieu_phu_kien", BigDecimal.TEN);
     private static final BigDecimal TRAM = BigDecimal.valueOf(100);
 
+    private final InventoryCountGuard inventoryCountGuard;
+
     private final PhieuTraHangRepository phieuRepository;
     private final ChiTietTraHangRepository chiTietTraRepository;
     private final HoaDonRepository hoaDonRepository;
@@ -177,6 +179,7 @@ public class TraHangService {
     /** Khách đã trả hàng và nhận tiền: cập nhật Serial, tồn kho, bảo hành. */
     @Transactional
     public PhieuTraResponse hoanTat(Integer id, String ip) {
+        inventoryCountGuard.stockMovement();
         TaiKhoanUserDetails u = CurrentUser.require();
         PhieuTraHang p = layPhieu(id, "da_duyet");
         HoaDon h = p.getHoaDon();
