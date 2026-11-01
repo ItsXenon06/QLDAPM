@@ -3,6 +3,7 @@ package com.xenon.qldapm.exception;
 import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -11,9 +12,11 @@ import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.LockedException;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -45,6 +48,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<ApiError> unreadable(HttpMessageNotReadableException e) {
         return build(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "Nội dung yêu cầu không đúng định dạng", Map.of());
+    }
+
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ApiError> typeMismatch(MethodArgumentTypeMismatchException e) {
+        return build(HttpStatus.BAD_REQUEST, "BAD_REQUEST", "Tham số '" + e.getName() + "' không hợp lệ", Map.of());
     }
 
     // ---- xác thực / phân quyền ----
@@ -80,6 +88,26 @@ public class GlobalExceptionHandler {
         log.warn("Vi phạm ràng buộc CSDL: {}", e.getMostSpecificCause().getMessage());
         return build(HttpStatus.CONFLICT, "DATA_INTEGRITY",
                 "Dữ liệu trùng lặp hoặc vi phạm ràng buộc (ví dụ: Serial/IMEI, mã đã tồn tại)", Map.of());
+    }
+
+    /** Hết thời gian chờ khóa dòng / deadlock khi nhiều quầy cùng thao tác. */
+    @ExceptionHandler(PessimisticLockingFailureException.class)
+    public ResponseEntity<ApiError> lockFailure(PessimisticLockingFailureException e) {
+        log.warn("Xung đột khóa dữ liệu: {}", e.getMessage());
+        return build(HttpStatus.CONFLICT, "XUNG_DOT_DU_LIEU",
+                "Dữ liệu đang được xử lý bởi thao tác khác, vui lòng thử lại", Map.of());
+    }
+
+    /** Chốt chặn cuối: lỗi HTTP chuẩn của Spring (404, 405, 415...) giữ đúng mã; còn lại là 500. */
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ApiError> fallback(Exception e) {
+        if (e instanceof ErrorResponse er) {
+            HttpStatus st = HttpStatus.valueOf(er.getStatusCode().value());
+            return build(st, st.name(), st.getReasonPhrase(), Map.of());
+        }
+        log.error("Lỗi không mong đợi", e);
+        return build(HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR",
+                "Hệ thống gặp lỗi, vui lòng thử lại sau", Map.of());
     }
 
     private ResponseEntity<ApiError> build(HttpStatus status, String code, String message, Map<String, String> errors) {

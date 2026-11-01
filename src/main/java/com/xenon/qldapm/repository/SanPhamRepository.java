@@ -1,6 +1,7 @@
 package com.xenon.qldapm.repository;
 
 import com.xenon.qldapm.entity.*;
+import java.util.Collection;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -18,9 +19,18 @@ public interface SanPhamRepository extends JpaRepository<SanPham, Integer> {
 
     boolean existsByMaVachAndNgayXoaIsNull(String maVach);
 
+    Page<SanPham> findByNgayXoaIsNull(Pageable pageable);
+
     Page<SanPham> findByDanhMuc_MaDanhMucAndNgayXoaIsNull(Integer maDanhMuc, Pageable pageable);
 
+    /** Lọc theo ngành hàng gồm cả các ngành con. */
+    Page<SanPham> findByDanhMuc_MaDanhMucInAndNgayXoaIsNull(Collection<Integer> maDanhMucs, Pageable pageable);
+
     Page<SanPham> findByThuongHieu_MaThuongHieuAndNgayXoaIsNull(Integer maThuongHieu, Pageable pageable);
+
+    boolean existsByDanhMuc_MaDanhMucAndNgayXoaIsNull(Integer maDanhMuc);
+
+    boolean existsByThuongHieu_MaThuongHieuAndNgayXoaIsNull(Integer maThuongHieu);
 
     /** Tìm nhanh theo tên / SKU / mã vạch (collation Vietnamese_CI_AS đã không phân biệt hoa thường). */
     @Query("select s from SanPham s where s.ngayXoa is null and "
