@@ -34,11 +34,11 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf
                         .csrfTokenRepository(CookieCsrfTokenRepository.withHttpOnlyFalse())
                         .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
-                        .ignoringRequestMatchers("/api/auth/login"))
+                        .ignoringRequestMatchers("/api/auth/login", "/api/payments/sepay/webhook"))
                 .addFilterAfter(new SessionRevocationFilter(revocation), SecurityContextHolderFilter.class)
                 .addFilterAfter(new CsrfCookieFilter(), BasicAuthenticationFilter.class)
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/login").permitAll()
+                        .requestMatchers("/api/auth/login", "/api/payments/sepay/webhook").permitAll()
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll())          // trang HTML/CSS/JS tĩnh
                 .exceptionHandling(ex -> ex

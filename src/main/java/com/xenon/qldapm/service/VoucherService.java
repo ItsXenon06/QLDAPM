@@ -64,6 +64,10 @@ public class VoucherService {
                 ? "het_han" : v.getTrangThai();
         return new VoucherResponse(v.getMaVoucher(), v.getMaCode(), v.getKhuyenMai().getMaKhuyenMai(), v.getGiaTri(),
                 v.getKhachHang() == null ? null : v.getKhachHang().getMaKhachHang(), tt, v.getNgayPhatHanh(),
-                v.getHanSuDung(), v.getNgaySuDung());
+                v.getHanSuDung(), v.getNgaySuDung(),
+                v.getKhachHang() == null ? null : v.getKhachHang().getHoTen(),
+                v.getKhachHang() == null ? null : v.getKhachHang().getSoDienThoai(),
+                v.getKhuyenMai().getTenChuongTrinh(),
+                v.getHoaDonPhatHanh() == null ? null : v.getHoaDonPhatHanh().getSoHoaDon());
     }
 }

@@ -46,6 +46,9 @@ public class NhapKhoService {
         TaiKhoanUserDetails u = CurrentUser.require();
         NhaCungCap ncc = nhaCungCapRepository.findById(r.maNCC()).filter(n -> n.getNgayXoa() == null)
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy nhà cung cấp"));
+        if (!Boolean.TRUE.equals(ncc.getTrangThai())) {
+            throw BusinessException.conflict("NCC_NGUNG_HOAT_DONG", "Nhà cung cấp đã ngừng hợp tác; hãy chọn nhà cung cấp đang hoạt động.");
+        }
 
         PhieuNhapKho p = new PhieuNhapKho();
         p.setMaSoPhieu("TMP-" + UUID.randomUUID().toString().substring(0, 12));   // đổi thành mã thật sau khi có ID

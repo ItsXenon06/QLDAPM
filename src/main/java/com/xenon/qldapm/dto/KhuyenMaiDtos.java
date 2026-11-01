@@ -47,5 +47,6 @@ public final class KhuyenMaiDtos {
 
     public record VoucherResponse(Integer maVoucher, String maCode, Integer maKhuyenMai, BigDecimal giaTri,
                                   Integer maKhachHang, String trangThai, LocalDateTime ngayPhatHanh,
-                                  LocalDateTime hanSuDung, LocalDateTime ngaySuDung) {}
+                                  LocalDateTime hanSuDung, LocalDateTime ngaySuDung, String tenKhachHang, String soDienThoai,
+                                  String tenChuongTrinh, String soHoaDonPhatHanh) {}
 }

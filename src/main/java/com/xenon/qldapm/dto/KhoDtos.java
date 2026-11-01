@@ -25,7 +25,7 @@ public final class KhoDtos {
                                     @Size(max = 20) String soDienThoai, @Size(max = 500) String diaChi,
                                     @Size(max = 150) String nguoiLienHe, @Size(max = 20) String maSoThue) {}
     public record NhaCungCapResponse(Integer maNCC, String tenNCC, String email, String soDienThoai, String diaChi,
-                                     String nguoiLienHe, String maSoThue) {}
+                                     String nguoiLienHe, String maSoThue, Boolean trangThai) {}
 
     // ===== Sản phẩm =====
     public record SanPhamRequest(

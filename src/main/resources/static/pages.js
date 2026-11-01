@@ -258,65 +258,73 @@ const catalogTypes = {
   },
 };
 export async function catalog(root) {
-  let selected = 'categories';
-  root.innerHTML =
-    head('Danh mục & đối tác', 'Sắp xếp ngành hàng và quản lý nguồn cung.') +
-    `<div class="row" style="margin-bottom:20px">${Object.entries(catalogTypes)
+  let selected = 'categories', rows = [];
+  const products = await all('/san-pham');
+  const clean = (text) => String(text || '').replace(/\s*\[QLDAPM-DEMO\]/g, '').trim();
+  root.innerHTML = head('Danh mục & đối tác', 'Ngành hàng phân loại sản phẩm; thương hiệu xác định hãng; nhà cung cấp là nơi nhập hàng.') +
+    `<div class="row catalog-tabs" style="margin-bottom:20px">${Object.entries(catalogTypes)
       .filter(([k]) => k !== 'suppliers' || can('NHA_CUNG_CAP_QUAN_LY', 'KHO_NHAP'))
-      .map(([k, v]) => btn(v.name, 'tab', k))
-      .join('')}</div><div id="catalog"></div>`;
-  let rows = [];
+      .map(([k,v]) => btn(v.name,'tab',k)).join('')}</div><div id="catalog"></div>`;
   const load = async () => {
-    const cfg = catalogTypes[selected];
-    rows = await api(cfg.path);
-    const writable = can(selected === 'suppliers' ? 'NHA_CUNG_CAP_QUAN_LY' : 'SAN_PHAM_QUAN_LY');
-    const fields = cfg.fields.map((f) =>
-      f.name === 'maDanhMucCha'
-        ? { ...f, type: 'select', numeric: true, options: opt(rows, cfg.id, cfg.nameKey) }
-        : f,
-    );
-    const box = $('#catalog', root);
-    box.innerHTML = `<section class="card"><div class="card-head"><h2>${h(cfg.name)}</h2>${writable ? btn('+ Thêm mới', 'new', '', 'primary') : ''}</div>${table(
-      [
-        { title: 'Tên', key: cfg.nameKey },
-        ...cfg.fields
-          .filter((f) => f.name !== cfg.nameKey)
-          .slice(0, 3)
-          .map((f) => ({ title: f.label, key: f.name })),
-        {
-          title: '',
-          render: (r) =>
-            writable
-              ? btn('Sửa', 'edit', r[cfg.id], 'small') + btn('Xóa', 'delete', r[cfg.id], 'small ghost danger')
-              : '',
-        },
-      ],
-      rows,
-    )}</section>`;
-    bind(box, {
-      new: () =>
-        formDialog('Thêm ' + cfg.name.toLowerCase(), fields, {}, (data) => api(cfg.path, 'POST', data)),
-      edit: (id) =>
-        formDialog(
-          'Sửa ' + cfg.name.toLowerCase(),
-          fields,
-          rows.find((r) => r[cfg.id] === Number(id)),
-          (data) => api(cfg.path + '/' + id, 'PUT', data),
-        ),
-      delete: (id) =>
-        confirmAction('Xóa ' + cfg.name, 'Xác nhận xóa mục này khỏi danh mục đang dùng?', () =>
-          api(cfg.path + '/' + id, 'DELETE'),
-        ),
+    const cfg=catalogTypes[selected]; rows=await api(cfg.path);
+    const writable=can(selected==='suppliers'?'NHA_CUNG_CAP_QUAN_LY':'SAN_PHAM_QUAN_LY');
+    const byId=new Map(rows.map(r=>[r[cfg.id],r]));
+    const descendants=(id,seen=new Set())=>{
+      if(seen.has(id)) return seen;seen.add(id);
+      rows.filter(r=>r.maDanhMucCha===id).forEach(r=>descendants(r.maDanhMuc,seen));return seen;
+    };
+    const categoryPath=(row,seen=new Set())=>{
+      if(!row || seen.has(row.maDanhMuc)) return '';seen.add(row.maDanhMuc);
+      const parent=byId.get(row.maDanhMucCha);
+      return (parent?categoryPath(parent,seen)+' › ':'')+row.tenDanhMuc;
+    };
+    const fieldsFor=(editing)=>cfg.fields.map(f=>f.name==='maDanhMucCha'?{
+      ...f,type:'select',numeric:true,help:'Để trống nếu là ngành hàng cấp cao nhất.',
+      options:rows.filter(r=>!editing||!descendants(editing.maDanhMuc).has(r.maDanhMuc))
+        .map(r=>({value:r.maDanhMuc,text:categoryPath(r)}))
+    }:f);
+    const actions={title:'',render:r=>writable?btn('Sửa','edit',r[cfg.id],'small')+btn('Xóa','delete',r[cfg.id],'small ghost danger'):''};
+    let display=rows, columns, note;
+    if(selected==='categories') {
+      const ordered=[],seen=new Set();
+      const append=(row,depth)=>{
+        if(seen.has(row.maDanhMuc))return;seen.add(row.maDanhMuc);ordered.push({...row,depth});
+        rows.filter(r=>r.maDanhMucCha===row.maDanhMuc).sort(sort).forEach(r=>append(r,depth+1));
+      };
+      const sort=(a,b)=>(a.thuTuHienThi-b.thuTuHienThi)||a.tenDanhMuc.localeCompare(b.tenDanhMuc,'vi');
+      rows.filter(r=>!byId.has(r.maDanhMucCha)).sort(sort).forEach(r=>append(r,0));
+      rows.filter(r=>!seen.has(r.maDanhMuc)).sort(sort).forEach(r=>append(r,0));display=ordered;
+      note='Danh mục con nằm ngay dưới danh mục cha. Ví dụ: Máy giặt › Máy giặt cửa trước. Số SKU gồm cả các danh mục con; danh mục chưa có SKU vẫn có thể dùng khi thêm sản phẩm.';
+      columns=[
+        {title:'Ngành hàng',render:r=>`<span class="category-name" style="padding-left:${Math.min(r.depth,8)*22}px">${r.depth?'↳ ':''}<b>${h(r.tenDanhMuc)}</b></span><span class="sub">${r.depth?'Danh mục con':'Ngành hàng chính'}</span>`},
+        {title:'Thuộc danh mục',render:r=>h(byId.get(r.maDanhMucCha)?.tenDanhMuc || 'Cấp cao nhất')},
+        {title:'Sản phẩm',render:r=>{const ids=descendants(r.maDanhMuc);const n=products.filter(p=>ids.has(p.maDanhMuc)).length;return n?`${n} SKU`:'<span class="sub">Chưa gắn sản phẩm</span>';}},
+        {title:'Phạm vi / ví dụ',render:r=>h(clean(r.moTa)||'Chưa bổ sung mô tả.')},
+        {title:'Ưu tiên',num:true,key:'thuTuHienThi'},actions];
+    } else if(selected==='brands') {
+      note='Thương hiệu là hãng của sản phẩm, khác với nhà cung cấp. Một hãng có thể xuất hiện trong nhiều ngành hàng.';
+      columns=[{title:'Thương hiệu',key:'tenThuongHieu'},
+        {title:'Quốc gia',render:r=>h(r.quocGia||'Chưa khai báo')},
+        {title:'Sản phẩm',render:r=>{const n=products.filter(p=>p.maThuongHieu===r.maThuongHieu).length;return n?`${n} SKU`:'<span class="sub">Chưa gắn sản phẩm</span>';}},
+        {title:'Ghi chú',render:r=>h(clean(r.moTa)||'—')},actions];
+    } else {
+      note='Nhà cung cấp được chọn trên phiếu nhập kho. Mã DEMO-NCC… là mã mẫu để thử nhập hàng, không phải mã số thuế thật.';
+      columns=[{title:'Nhà cung cấp',render:r=>`<b>${h(r.tenNCC)}</b><span class="sub">${h(r.diaChi||'Chưa có địa chỉ')}</span>`},
+        {title:'Liên hệ giao nhận',render:r=>`<span>${h(r.nguoiLienHe||'Chưa có người liên hệ')}</span><span class="sub">${h(r.soDienThoai||r.email||'Chưa có thông tin liên hệ')}</span>`},
+        {title:'Mã số thuế / mã mẫu',key:'maSoThue'},
+        {title:'Trạng thái',render:r=>badge(r.trangThai===false?'tam_dung':'hoat_dong')},actions];
+    }
+    $$('.catalog-tabs button',root).forEach(button=>button.classList.toggle('primary',button.dataset.id===selected));
+    const box=$('#catalog',root);
+    box.innerHTML=`<section class="card"><div class="card-head"><h2>${h(cfg.name)} <span class="sub">${rows.length} mục</span></h2>${writable?btn('+ Thêm mới','new','','primary'): '<span class="badge">Chỉ xem · theo quyền tài khoản</span>'}</div><p class="catalog-explanation">${h(note)}${selected==='categories'?' Ưu tiên nhỏ hơn được xếp trước trong cùng cấp.':''}</p>${table(columns,display)}</section>`;
+    bind(box,{
+      new:()=>formDialog('Thêm '+cfg.name.toLowerCase(),fieldsFor(),{},data=>api(cfg.path,'POST',data)),
+      edit:id=>{const row=rows.find(r=>r[cfg.id]===Number(id));return formDialog('Sửa '+cfg.name.toLowerCase(),fieldsFor(row),row,data=>api(cfg.path+'/'+id,'PUT',data));},
+      delete:id=>confirmAction('Xóa '+cfg.name,'Xác nhận xóa mục này khỏi danh mục đang dùng?',()=>api(cfg.path+'/'+id,'DELETE')),
     });
-    box.addEventListener('click', (e) => e.stopPropagation());
+    box.addEventListener('click',e=>e.stopPropagation());
   };
-  bind(root, {
-    tab: async (id) => {
-      selected = id;
-      await load();
-    },
-  });
-  await load();
+  bind(root,{tab:async id=>{selected=id;await load();}});await load();
 }
 
 export const customerFields = [
@@ -346,8 +354,9 @@ export async function customers(root) {
       [
         { title: 'Khách hàng', key: 'hoTen' },
         { title: 'Điện thoại', key: 'soDienThoai' },
-        { title: 'Email', key: 'email' },
-        { title: 'Địa chỉ', key: 'diaChi' },
+        { title: 'Email', render: (r) => h(r.email || 'Chưa khai báo') },
+        { title: 'Địa chỉ', render: (r) => h(r.diaChi || 'Chưa khai báo') },
+        { title: 'Thông tin xuất hóa đơn', render: (r) => h(r.tenCongTy || 'Khách cá nhân') },
         {
           title: '',
           render: (r) =>

@@ -79,7 +79,7 @@ export async function receiving(root) {
         label: 'Nhà cung cấp',
         required: true,
         numeric: true,
-        options: opt(suppliers, 'maNCC', 'tenNCC'),
+        options: opt(suppliers.filter(s => s.trangThai !== false), 'maNCC', 'tenNCC'),
       },
       { name: 'soChungTuNCC', label: 'Số chứng từ nhà cung cấp' },
       { name: 'ngayDuKien', label: 'Dự kiến nhận', type: 'datetime-local' },
@@ -442,7 +442,8 @@ export async function vouchers(root) {
       [
         { title: 'Mã voucher', key: 'maCode' },
         { title: 'Giá trị', num: true, render: (r) => money(r.giaTri) },
-        { title: 'Khách hàng #', key: 'maKhachHang' },
+        { title: 'Khách hàng', render: (r) => `<b>${h(r.tenKhachHang || 'Không giới hạn khách')}</b><span class="sub">${h(r.soDienThoai || '')}</span>` },
+        { title: 'Nguồn phát hành', render: (r) => `<span>${h(r.tenChuongTrinh || '—')}</span><span class="sub mono">${h(r.soHoaDonPhatHanh || 'Không có hóa đơn nguồn')}</span>` },
         { title: 'Phát hành', render: (r) => date(r.ngayPhatHanh) },
         { title: 'Hạn dùng', render: (r) => date(r.hanSuDung) },
         { title: 'Trạng thái', render: (r) => badge(r.trangThai) },

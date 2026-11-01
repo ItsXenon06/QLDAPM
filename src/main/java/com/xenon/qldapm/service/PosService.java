@@ -46,6 +46,7 @@ public class PosService {
     private static final Set<String> PHUONG_THUC = Set.of("tien_mat", "the_ngan_hang", "qr_chuyen_khoan", "tra_gop");
 
     private final InventoryCountGuard inventoryCountGuard;
+    private final SePayGuard sePayGuard;
 
     private final HoaDonRepository hoaDonRepository;
     private final ChiTietHoaDonRepository chiTietRepository;
@@ -260,7 +261,13 @@ public class PosService {
     public void huyNhap(Integer id) {
         HoaDon h = layCuaToi(id, "dang_lap", "tam_giu");
         khuyenMai.xoaTatCa(h);
-        hoaDonRepository.delete(h);
+        if (sePayGuard.hasHistory(id)) {
+            // Keep the QR reference traceable if a late transfer arrives after abandoning this draft.
+            h.getChiTiets().forEach(c -> c.setHieuLuc(false));
+            h.setTrangThai("da_huy");
+            h.setHuyBoi(h.getThuNgan());
+            h.setLyDoHuy("Hủy hóa đơn nháp sau khi hủy/hết hạn QR SePay; giữ lịch sử đối soát.");
+        } else hoaDonRepository.delete(h);
     }
 
     // ===================== thanh toán =====================
@@ -300,8 +307,22 @@ public class PosService {
     @Transactional
     public HoaDonResponse thanhToan(Integer id, ThanhToanRequest r) {
         inventoryCountGuard.stockMovement();
-        TaiKhoanUserDetails u = CurrentUser.require();
         HoaDon h = layCuaToi(id, "dang_lap");
+        return chotThanhToan(h, r, null);
+    }
+
+    /** Internal verified-webhook entry point; no session impersonation or public HTTP route. */
+    @Transactional
+    public HoaDonResponse thanhToanSePay(Integer id, BigDecimal amount, String reference, String snapshot) {
+        inventoryCountGuard.stockMovement();
+        HoaDon h = hoaDonRepository.findByIdForUpdate(id).orElseThrow(() -> new NotFoundException("Không tìm thấy hóa đơn"));
+        if (!"dang_lap".equals(h.getTrangThai())) throw BusinessException.conflict("SEPAY_CAN_DOI_SOAT", "Hóa đơn không còn đang lập; cần đối soát khoản chuyển.");
+        return chotThanhToan(h, new ThanhToanRequest(List.of(new DongThanhToanRequest(
+                "qr_chuyen_khoan", amount, null, reference, null, null))), snapshot);
+    }
+
+    private HoaDonResponse chotThanhToan(HoaDon h, ThanhToanRequest r, String expectedSnapshot) {
+        Integer actor = h.getThuNgan().getMaNhanVien();
         if (dongHieuLuc(h).isEmpty()) throw BusinessException.badRequest("HOA_DON_TRONG", "Hóa đơn chưa có hàng");
 
         QuayPOS quay = quayRepository.findByIdForUpdate(h.getQuay().getMaQuay())
@@ -311,6 +332,9 @@ public class PosService {
         }
 
         dinhGiaLai(h);
+        if (expectedSnapshot != null && !expectedSnapshot.equals(SePayFingerprint.of(toResponse(h, true)))) {
+            throw BusinessException.conflict("SEPAY_GIA_THAY_DOI", "Giỏ hàng/giá/khuyến mãi đã thay đổi sau khi tạo QR; cần đối soát khoản chuyển.");
+        }
         List<ChiTietHoaDon> dongs = dongHieuLuc(h);
         BigDecimal canTra = h.getTongTienHang().subtract(h.getTongGiamGia());
 
@@ -337,11 +361,11 @@ public class PosService {
                     }
                     s.setTrangThai("da_ban");
                     tonKhoService.ghiLichSuSerial(s, "trong_kho", "da_ban", "hoa_don", h.getMaHoaDon(),
-                            u.getMaNhanVien(), "Bán tại " + quay.getMaQuayCode());
+                            actor, "Bán tại " + quay.getMaQuayCode());
                 });
         for (Map.Entry<Integer, Integer> e : tongTheoSanPham(dongs).entrySet()) {
             tonKhoService.dieuChinh(e.getKey(), -e.getValue(), "xuat_ban", "hoa_don", h.getMaHoaDon(),
-                    u.getMaNhanVien(), "Bán tại " + quay.getMaQuayCode());
+                    actor, "Bán tại " + quay.getMaQuayCode());
         }
 
         // 3b. khuyến mãi: tăng lượt dùng (có khóa), phát hành/đổi voucher
@@ -457,7 +481,7 @@ public class PosService {
         for (HoaDon x : hoaDonRepository.findByTrangThaiInAndThoiGianTaoBefore(NHAP, moc)) {
             Optional<HoaDon> locked = hoaDonRepository.findByIdForUpdate(x.getMaHoaDon())
                     .filter(h -> NHAP.contains(h.getTrangThai()));
-            if (locked.isPresent()) {
+            if (locked.isPresent() && !sePayGuard.hasHistory(x.getMaHoaDon())) {
                 khuyenMai.xoaTatCa(locked.get());
                 hoaDonRepository.delete(locked.get());
                 n++;
@@ -477,6 +501,7 @@ public class PosService {
         if (!Arrays.asList(trangThais).contains(h.getTrangThai())) {
             throw BusinessException.conflict("HOA_DON_SAI_TRANG_THAI", "Hóa đơn đang ở trạng thái '" + h.getTrangThai() + "'");
         }
+        sePayGuard.editable(id);
         return h;
     }
 

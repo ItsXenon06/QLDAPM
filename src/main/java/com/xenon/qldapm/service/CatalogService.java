@@ -218,7 +218,7 @@ public class CatalogService {
 
     private static NhaCungCapResponse toResponse(NhaCungCap n) {
         return new NhaCungCapResponse(n.getMaNCC(), n.getTenNCC(), n.getEmail(), n.getSoDienThoai(),
-                n.getDiaChi(), n.getNguoiLienHe(), n.getMaSoThue());
+                n.getDiaChi(), n.getNguoiLienHe(), n.getMaSoThue(), n.getTrangThai());
     }
 
     private static String blankToNull(String s) {

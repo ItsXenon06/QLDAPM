@@ -544,7 +544,7 @@ export async function pos(root) {
       },
     });
   };
-  const pay = async () => {
+  const manualPay = async () => {
     invoice = await api(`${path}/${invoice.maHoaDon}/dinh-gia`, 'POST');
     render();
     const paymentFields = [
@@ -620,6 +620,84 @@ export async function pos(root) {
         $('[type=submit]', form).textContent = 'Hoàn tất thanh toán';
       },
     );
+  };
+  const sepaySettings = await api('/payments/sepay/settings');
+  const showQr = async (payment) => {
+    const invoiceId = invoice.maHoaDon;
+    const dialog = modal('Chuyển khoản QR · SePay', `
+      <section class="sepay-payment">
+        <div class="sepay-mode">${payment.testMode ? 'CHẾ ĐỘ THỬ NGHIỆM · KHÔNG CHUYỂN TIỀN THẬT' : 'CHUYỂN KHOẢN NGÂN HÀNG'}</div>
+        <div class="total-row grand"><span>Cần thu</span><strong>${money(payment.amount)}</strong></div>
+        <div class="sepay-qr">${payment.qrUrl ? `<img src="${h(payment.qrUrl)}" alt="Mã QR thanh toán ${h(payment.reference)}" referrerpolicy="no-referrer"><p class="note">Nếu ảnh không tải được, dùng thông tin chuyển khoản bên dưới.</p>` : ''}</div>
+        <dl class="sepay-details"><dt>Ngân hàng</dt><dd>${h(payment.bank)}</dd><dt>Số tài khoản</dt><dd>${h(payment.accountNumber)}</dd><dt>Tên tài khoản</dt><dd>${h(payment.accountName || '—')}</dd><dt>Nội dung chuyển khoản</dt><dd><strong>${h(payment.reference)}</strong></dd></dl>
+        <p class="sepay-state" aria-live="polite"></p><p class="sepay-note note"></p>
+        <p class="note">${payment.testMode ? 'Trong SePay Test mode → Mô phỏng giao dịch: chọn tiền vào, nhập đúng số tiền và mã bên trên. ' : ''}Hóa đơn chỉ chốt sau khi máy chủ xác minh thông báo SePay.</p>
+        <div class="form-actions"><button type="button" data-act="check-qr">Kiểm tra lại</button><button type="button" data-act="cancel-qr">Hủy mã QR</button><button type="button" data-act="retry-qr" hidden>Thử chốt lại hóa đơn</button><button type="button" data-act="new-qr" hidden>Tạo mã QR mới</button></div>
+        <p class="note">Đóng cửa sổ vẫn giữ mã QR. Mở Thanh toán để xem lại; hủy mã trước khi sửa giỏ hàng hoặc thu tiền bằng cách khác.</p>
+      </section>`);
+    const panel=$('.sepay-payment',dialog);
+    let timer, busy=false, finished=false;
+    const cleanup=()=>{clearTimeout(timer);finished=true;dialog.removeEventListener('close',onClose);};
+    const onClose=()=>{if(!dialog.open) cleanup();};
+    const display = (p) => {
+      payment=p;
+      const names={PENDING:'Đang chờ SePay xác nhận',PAID:'Đã thanh toán',REVIEW:'Đã nhận thông báo · Cần đối soát',EXPIRED:'Mã QR đã hết hạn',CANCELLED:'Mã QR đã hủy'};
+      $('.sepay-state',dialog).textContent=(names[p.status]||p.status)+(p.status==='PENDING' ? ` · còn ${Math.floor(p.remainingSeconds/60)}:${String(p.remainingSeconds%60).padStart(2,'0')}` : '');
+      $('.sepay-state',dialog).dataset.status=p.status;
+      $('.sepay-note',dialog).textContent=(p.note||'')+(p.status==='REVIEW' ? ` Đã ghi nhận: ${money(p.receivedAmount)}. Không thu thêm / giao hàng trước khi đối soát.` : '');
+      $('[data-act=cancel-qr]',dialog).hidden=p.status!=='PENDING';
+      $('[data-act=retry-qr]',dialog).hidden=!p.retryAllowed;
+      $('[data-act=new-qr]',dialog).hidden=!['EXPIRED','CANCELLED'].includes(p.status);
+      if(p.status!=='PENDING') $('.sepay-qr',dialog).hidden=true;
+    };
+    const check = async () => {
+      if(!dialog.open || !panel.isConnected || finished) {cleanup();return;}
+      if(busy) return;
+      busy=true;
+      try {
+        const p=await api(`${path}/${invoiceId}/sepay`);
+        if(!dialog.open || !panel.isConnected || finished) return;
+        display(p);
+        if(p.status==='PAID') {
+          cleanup();
+          const paid=await api(`${path}/${invoiceId}`);
+          invoice=null;
+          dialog.close();
+          await state.refresh();
+          await receipt(paid);
+          return;
+        }
+      } catch(error) {
+        if(dialog.open && panel.isConnected && !finished) $('.sepay-note',dialog).textContent='Chưa kiểm tra được: '+error.message+'. Mã QR vẫn được lưu; không xác nhận thủ công khi chưa đối soát.';
+      } finally {
+        busy=false;
+        clearTimeout(timer);
+        if(dialog.open && panel.isConnected && !finished) timer=setTimeout(check,2500);
+      }
+    };
+    dialog.addEventListener('close',onClose);
+    display(payment);
+    bind(dialog,{
+      'check-qr':check,
+      'cancel-qr':async()=>{display(await api(`${path}/${invoiceId}/sepay/${payment.id}/cancel`,'POST'));},
+      'retry-qr':async()=>{await api(`${path}/${invoiceId}/sepay/${payment.id}/retry`,'POST');await check();},
+      'new-qr':async()=>{const next=await api(`${path}/${invoiceId}/sepay`,'POST');dialog.close();await showQr(next);},
+    });
+    timer=setTimeout(check,1000);
+  };
+  const pay = async () => {
+    const existing=await api(`${path}/${invoice.maHoaDon}/sepay`);
+    if(existing && ['PENDING','REVIEW'].includes(existing.status)) return showQr(existing);
+    if(!sepaySettings.enabled) return manualPay();
+    const dialog=modal('Chọn cách thanh toán',`<div class="sepay-choice"><button class="primary" data-act="sepay-start">QR chuyển khoản · SePay${sepaySettings.testMode ? ' (thử nghiệm)' : ''}</button><button data-act="manual-pay">Tiền mặt / thẻ / thanh toán đối chiếu tại quầy</button><p class="note">QR SePay thu toàn bộ hóa đơn và tự xác nhận. Các phương thức khác giữ cách ghi nhận tại quầy hiện tại.</p><div class="error" hidden></div></div>`);
+    bind(dialog,{
+      'sepay-start':async()=>{
+        const button=$('[data-act=sepay-start]',dialog);button.disabled=true;
+        try {const payment=await api(`${path}/${invoice.maHoaDon}/sepay`,'POST');dialog.close();await showQr(payment);}
+        finally {button.disabled=false;}
+      },
+      'manual-pay':async()=>{dialog.close();await manualPay();},
+    });
   };
   const openPayment = async () => {
     if (paymentOpening) return;

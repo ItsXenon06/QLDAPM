@@ -84,3 +84,17 @@
 # This public template contains placeholders, never live credentials.
 !/.env.example
 !/database/001_initial_schema.sql
+
+# Required production migration bundled in the application.
+!/src/main/resources/db/sepay.sql
+
+# Public clone/demo instructions and sanitized reproducible demo setup.
+!/README.md
+!/database/002_demo_seed.sql
+!/scripts/
+/scripts/*
+!/scripts/Create-Demo-Database.ps1
+!/scripts/Start-App.ps1
+!/scripts/Start-SePay-Tunnel.ps1
+!/scripts/Stop-SePay-Tunnel.ps1
+!/scripts/sepay-webhook-proxy.py
