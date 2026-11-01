@@ -15,6 +15,7 @@ public final class PosDtos {
     public record TaoHoaDonRequest(Integer maQuay, Integer maKhachHang) {}
     /** ma = SKU, mã vạch, Serial hoặc IMEI (một ô duy nhất). */
     public record ThemDongRequest(@NotBlank @Size(max = 100) String ma, @Min(1) @Max(999) Integer soLuong) {}
+    /** giamGia = số tiền GIẢM TAY của dòng (không gồm khuyến mãi tự động). */
     public record CapNhatDongRequest(@Min(1) @Max(999) Integer soLuong, @DecimalMin("0") BigDecimal giamGia) {}
     public record GanKhachRequest(Integer maKhachHang) {}
     public record HuyHoaDonRequest(@NotBlank @Size(max = 255) String lyDo) {}
@@ -31,11 +32,12 @@ public final class PosDtos {
                                  BigDecimal tongTienHang, BigDecimal tongGiamGia, BigDecimal tongThanhToan,
                                  BigDecimal tongTienThue, Integer soLanIn, LocalDateTime thoiGianTao,
                                  LocalDateTime thoiGianThanhToan, String lyDoHuy,
-                                 List<DongHoaDonResponse> dongs, List<ThanhToanResponse> thanhToans) {}
+                                 List<DongHoaDonResponse> dongs, List<ThanhToanResponse> thanhToans,
+                                 List<KhuyenMaiDtos.KmApDungResponse> khuyenMais) {}
     public record DongHoaDonResponse(Integer maChiTiet, Integer maSanPham, String maSKU, String tenHang,
                                      Integer maSerial, String soSerial, Integer soLuong, BigDecimal donGia,
                                      BigDecimal giamGia, BigDecimal thanhTien, BigDecimal thueSuat, BigDecimal tienThue,
-                                     Integer baoHanhThang, Boolean hieuLuc) {}
+                                     Integer baoHanhThang, Boolean hieuLuc, Boolean laQuaTang) {}
     public record ThanhToanResponse(String phuongThuc, String trangThai, BigDecimal soTien, BigDecimal tienKhachDua,
                                     BigDecimal tienThoiLai, String maThamChieu, String donViTraGop, Integer soKyHan,
                                     LocalDateTime thanhToanLuc) {}

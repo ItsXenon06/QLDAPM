@@ -27,12 +27,15 @@ import java.util.*;
  * Bán hàng tại quầy. Vòng đời: dang_lap <-> tam_giu -> da_thanh_toan -> da_huy (cùng ngày).
  *
  * Quy tắc chính:
- *  - Server tự định giá từ SanPham (không tin client); giảm giá tay chỉ khi sản phẩm có giá sàn và không thấp hơn sàn.
+ *  - Server tự định giá từ SanPham (không tin client); giảm giá TAY chỉ khi sản phẩm có giá sàn và không thấp hơn sàn.
+ *    Khuyến mãi/voucher do KhuyenMaiEngine tính và KHÔNG bị chặn bởi giá sàn (GiamGia dòng = giảm tay + khuyến mãi).
+ *  - Mỗi lần đổi giỏ hàng/khách hàng, engine tính lại khuyến mãi; khi thanh toán định giá + tính lại khuyến mãi lần cuối.
  *  - Hàng Serial: thêm vào hóa đơn là "giữ chỗ" (unique index HieuLuc=1 + khóa dòng Serial); chỉ chuyển da_ban khi thanh toán.
- *  - Hàng thường: trừ tồn (có khóa) lúc thanh toán; khóa theo thứ tự mã để tránh deadlock.
+ *  - Hàng thường (kể cả quà tặng): trừ tồn (có khóa) lúc thanh toán; khóa theo thứ tự mã để tránh deadlock.
  *  - Tổng các khoản thanh toán phải đúng bằng số phải trả; tiền mặt tính tiền thối; thẻ/QR/trả góp bắt buộc mã tham chiếu.
  *  - Số hóa đơn HD-{QUAY}-{yyyyMMdd}-{stt} chỉ cấp khi thanh toán (khóa quầy) nên không có "lỗ" số do hủy nháp.
  *  - Thanh toán xong tự tạo BaoHanh (thời hạn theo SanPham.BaoHanhThang, bắt đầu từ lúc thanh toán).
+ *  - Hủy hóa đơn hoàn tác kho, bảo hành, lượt dùng khuyến mãi và voucher.
  *  - Mỗi thu ngân chỉ có 1 hóa đơn đang lập; nháp quá hạn bị dọn tự động.
  */
 @Service
@@ -55,6 +58,7 @@ public class PosService {
     private final NhanVienRepository nhanVienRepository;
     private final TonKhoService tonKhoService;
     private final NhatKyService nhatKyService;
+    private final KhuyenMaiEngine khuyenMai;
 
     @Value("${app.pos.draft-expire-minutes:180}")
     private int draftExpireMinutes;
@@ -159,15 +163,19 @@ public class PosService {
                 themDongMoi(h, sp, null, sl);
             }
         }
+        khuyenMai.apDungLai(h);
         tinhLai(h);
         hoaDonRepository.flush();
         return toResponse(h, true);
     }
 
+    /** giamGia = số tiền giảm TAY của dòng; phần khuyến mãi tự động được giữ nguyên rồi engine tính lại. */
     @Transactional
     public HoaDonResponse capNhatDong(Integer id, Integer maChiTiet, CapNhatDongRequest r) {
         HoaDon h = layCuaToi(id, "dang_lap");
         ChiTietHoaDon c = timDong(h, maChiTiet);
+        chanDongQuaTang(c);
+        BigDecimal tay = c.getGiamGia().subtract(khuyenMai.tongKhuyenMaiDong(c)).max(BigDecimal.ZERO);
         if (r.soLuong() != null) {
             if (c.getSerial() != null && r.soLuong() != 1) {
                 throw BusinessException.badRequest("SERIAL_SO_LUONG", "Dòng có Serial luôn có số lượng 1");
@@ -175,8 +183,10 @@ public class PosService {
             if (c.getSerial() == null) kiemTraTon(c.getSanPham(), r.soLuong());
             c.setSoLuong(r.soLuong());
         }
-        if (r.giamGia() != null) c.setGiamGia(r.giamGia());
-        validateGiamGia(c);
+        if (r.giamGia() != null) tay = r.giamGia();
+        validateGiamGiaTay(c, tay);
+        c.setGiamGia(BigDecimal.ZERO);          // tránh vi phạm ràng buộc GiamGia <= SL*DonGia khi flush
+        khuyenMai.apDungLai(h, c, tay);
         tinhLai(h);
         hoaDonRepository.flush();
         return toResponse(h, true);
@@ -186,7 +196,10 @@ public class PosService {
     public HoaDonResponse xoaDong(Integer id, Integer maChiTiet) {
         HoaDon h = layCuaToi(id, "dang_lap");
         ChiTietHoaDon c = timDong(h, maChiTiet);
+        chanDongQuaTang(c);
+        khuyenMai.goDong(c);
         h.getChiTiets().remove(c);          // orphanRemoval => xóa dòng, nhả Serial
+        khuyenMai.apDungLai(h);
         tinhLai(h);
         hoaDonRepository.flush();
         return toResponse(h, true);
@@ -196,6 +209,27 @@ public class PosService {
     public HoaDonResponse ganKhach(Integer id, Integer maKhachHang) {
         HoaDon h = layCuaToi(id, "dang_lap");
         h.setKhachHang(maKhachHang == null ? null : layKhach(maKhachHang));
+        khuyenMai.apDungLai(h);              // voucher/khuyến mãi tặng voucher phụ thuộc khách hàng
+        tinhLai(h);
+        hoaDonRepository.flush();
+        return toResponse(h, true);
+    }
+
+    @Transactional
+    public HoaDonResponse apDungMa(Integer id, String ma) {
+        HoaDon h = layCuaToi(id, "dang_lap");
+        khuyenMai.themMa(h, ma);
+        tinhLai(h);
+        hoaDonRepository.flush();
+        return toResponse(h, true);
+    }
+
+    @Transactional
+    public HoaDonResponse goMa(Integer id, String ma) {
+        HoaDon h = layCuaToi(id, "dang_lap");
+        khuyenMai.goMa(h, ma);
+        tinhLai(h);
+        hoaDonRepository.flush();
         return toResponse(h, true);
     }
 
@@ -221,6 +255,7 @@ public class PosService {
     @Transactional
     public void huyNhap(Integer id) {
         HoaDon h = layCuaToi(id, "dang_lap", "tam_giu");
+        khuyenMai.xoaTatCa(h);
         hoaDonRepository.delete(h);
     }
 
@@ -230,8 +265,7 @@ public class PosService {
     public HoaDonResponse thanhToan(Integer id, ThanhToanRequest r) {
         TaiKhoanUserDetails u = CurrentUser.require();
         HoaDon h = layCuaToi(id, "dang_lap");
-        List<ChiTietHoaDon> dongs = dongHieuLuc(h);
-        if (dongs.isEmpty()) throw BusinessException.badRequest("HOA_DON_TRONG", "Hóa đơn chưa có hàng");
+        if (dongHieuLuc(h).isEmpty()) throw BusinessException.badRequest("HOA_DON_TRONG", "Hóa đơn chưa có hàng");
 
         QuayPOS quay = quayRepository.findByIdForUpdate(h.getQuay().getMaQuay())
                 .orElseThrow(() -> new NotFoundException("Không tìm thấy quầy"));
@@ -239,13 +273,22 @@ public class PosService {
             throw BusinessException.conflict("QUAY_KHONG_HOAT_DONG", "Quầy không còn hoạt động");
         }
 
-        // 1. định giá lại theo giá hiện hành, kiểm tra lại giá sàn
-        for (ChiTietHoaDon c : dongs) {
+        // 1. định giá lại theo giá hiện hành (bỏ qua quà tặng), tính lại khuyến mãi, kiểm tra giá sàn phần giảm tay
+        for (ChiTietHoaDon c : dongHieuLuc(h)) {
+            if (Boolean.TRUE.equals(c.getLaQuaTang())) continue;
             SanPham sp = c.getSanPham();
             checkBanDuoc(sp);
             c.setDonGia(sp.getGiaNiemYet());
             c.setThueSuat(sp.getThueSuatVAT());
-            validateGiamGia(c);
+            BigDecimal gross = c.getDonGia().multiply(BigDecimal.valueOf(c.getSoLuong()));
+            if (c.getGiamGia().compareTo(gross) > 0) c.setGiamGia(gross);   // giá giảm sau khi lập: tránh vi phạm CHECK
+        }
+        khuyenMai.apDungLai(h);
+        List<ChiTietHoaDon> dongs = dongHieuLuc(h);
+        for (ChiTietHoaDon c : dongs) {
+            if (Boolean.TRUE.equals(c.getLaQuaTang())) continue;
+            BigDecimal tay = c.getGiamGia().subtract(khuyenMai.tongKhuyenMaiDong(c)).max(BigDecimal.ZERO);
+            validateGiamGiaTay(c, tay);
         }
         tinhLai(h);
         BigDecimal canTra = h.getTongTienHang().subtract(h.getTongGiamGia());
@@ -280,6 +323,9 @@ public class PosService {
             tonKhoService.dieuChinh(e.getKey(), -e.getValue(), "xuat_ban", "hoa_don", h.getMaHoaDon(),
                     u.getMaNhanVien(), "Bán tại " + quay.getMaQuayCode());
         }
+
+        // 3b. khuyến mãi: tăng lượt dùng (có khóa), phát hành/đổi voucher
+        khuyenMai.chot(h);
 
         // 4. thanh toán
         LocalDateTime now = LocalDateTime.now();
@@ -350,6 +396,7 @@ public class PosService {
             throw BusinessException.conflict("DA_CO_PHIEU_TRA", "Hóa đơn đã có phiếu trả hàng, không thể hủy");
         }
         List<ChiTietHoaDon> dongs = dongHieuLuc(h);
+        khuyenMai.hoanTac(h);          // kiểm tra voucher đã phát hành chưa bị dùng; hoàn lượt dùng/voucher
         dongs.stream().filter(c -> c.getSerial() != null)
                 .sorted(Comparator.comparing((ChiTietHoaDon c) -> c.getSerial().getMaSerial()))
                 .forEach(c -> {
@@ -390,6 +437,7 @@ public class PosService {
             Optional<HoaDon> locked = hoaDonRepository.findByIdForUpdate(x.getMaHoaDon())
                     .filter(h -> NHAP.contains(h.getTrangThai()));
             if (locked.isPresent()) {
+                khuyenMai.xoaTatCa(locked.get());
                 hoaDonRepository.delete(locked.get());
                 n++;
             }
@@ -449,6 +497,12 @@ public class PosService {
                 .findFirst().orElseThrow(() -> new NotFoundException("Không tìm thấy dòng hàng #" + maChiTiet));
     }
 
+    private static void chanDongQuaTang(ChiTietHoaDon c) {
+        if (Boolean.TRUE.equals(c.getLaQuaTang())) {
+            throw BusinessException.badRequest("KHONG_SUA_QUA_TANG", "Dòng quà tặng do khuyến mãi tự tạo, không thể sửa hoặc xóa");
+        }
+    }
+
     private static List<ChiTietHoaDon> dongHieuLuc(HoaDon h) {
         return h.getChiTiets().stream().filter(c -> Boolean.TRUE.equals(c.getHieuLuc())).toList();
     }
@@ -459,19 +513,18 @@ public class PosService {
         return m;
     }
 
-    /** Giảm giá tay: chỉ khi SP có giá sàn; đơn giá sau giảm không thấp hơn giá sàn. */
-    private static void validateGiamGia(ChiTietHoaDon c) {
+    /** Giảm giá TAY: chỉ khi SP có giá sàn; đơn giá sau giảm tay không thấp hơn giá sàn. Khuyến mãi không bị chặn sàn. */
+    private static void validateGiamGiaTay(ChiTietHoaDon c, BigDecimal tay) {
         BigDecimal gross = c.getDonGia().multiply(BigDecimal.valueOf(c.getSoLuong()));
-        BigDecimal giam = c.getGiamGia();
-        if (giam.signum() < 0 || giam.compareTo(gross) > 0) {
+        if (tay.signum() < 0 || tay.compareTo(gross) > 0) {
             throw BusinessException.badRequest("GIAM_GIA_KHONG_HOP_LE", "Số tiền giảm không hợp lệ cho " + c.getMaSKU());
         }
-        if (giam.signum() == 0) return;
+        if (tay.signum() == 0) return;
         BigDecimal san = c.getSanPham().getGiaToiThieu();
         if (san == null) {
             throw BusinessException.badRequest("KHONG_DUOC_GIAM_GIA", "Sản phẩm " + c.getMaSKU() + " chưa có giá tối thiểu nên không được giảm giá tay");
         }
-        if (gross.subtract(giam).compareTo(san.multiply(BigDecimal.valueOf(c.getSoLuong()))) < 0) {
+        if (gross.subtract(tay).compareTo(san.multiply(BigDecimal.valueOf(c.getSoLuong()))) < 0) {
             throw BusinessException.badRequest("DUOI_GIA_SAN", "Giá sau giảm của " + c.getMaSKU() + " thấp hơn giá tối thiểu");
         }
     }
@@ -529,6 +582,7 @@ public class PosService {
         KhachHang k = h.getKhachHang();
         List<DongHoaDonResponse> dongs = null;
         List<ThanhToanResponse> tts = null;
+        List<com.xenon.qldapm.dto.KhuyenMaiDtos.KmApDungResponse> kms = null;
         if (kemChiTiet) {
             dongs = h.getChiTiets().stream().map(c -> {
                 BigDecimal gross = c.getDonGia().multiply(BigDecimal.valueOf(c.getSoLuong()));
@@ -536,17 +590,19 @@ public class PosService {
                         c.getSerial() == null ? null : c.getSerial().getMaSerial(),
                         c.getSerial() == null ? null : c.getSerial().getSoSerial(),
                         c.getSoLuong(), c.getDonGia(), c.getGiamGia(), gross.subtract(c.getGiamGia()), c.getThueSuat(),
-                        tienThue(c, gross), c.getSanPham().getBaoHanhThang(), c.getHieuLuc());
+                        tienThue(c, gross), c.getSanPham().getBaoHanhThang(), c.getHieuLuc(), c.getLaQuaTang());
             }).toList();
             tts = h.getMaHoaDon() == null ? List.of() : thanhToanRepository.findByHoaDon_MaHoaDon(h.getMaHoaDon()).stream()
                     .map(t -> new ThanhToanResponse(t.getPhuongThuc(), t.getTrangThai(), t.getSoTien(), t.getTienKhachDua(),
                             t.getTienKhachDua() == null ? null : t.getTienKhachDua().subtract(t.getSoTien()),
                             t.getMaThamChieu(), t.getDonViTraGop(), t.getSoKyHan(), t.getThanhToanLuc())).toList();
+            kms = h.getMaHoaDon() == null ? List.of() : khuyenMai.tomTat(h.getMaHoaDon());
         }
         return new HoaDonResponse(h.getMaHoaDon(), h.getSoHoaDon().startsWith("TMP-") ? null : h.getSoHoaDon(),
                 h.getQuay().getMaQuay(), h.getQuay().getTenQuay(), h.getThuNgan().getHoTen(),
                 k == null ? null : k.getMaKhachHang(), k == null ? null : k.getHoTen(), k == null ? null : k.getSoDienThoai(),
                 h.getTrangThai(), h.getTongTienHang(), h.getTongGiamGia(), h.getTongTienHang().subtract(h.getTongGiamGia()),
-                h.getTongTienThue(), h.getSoLanIn(), h.getThoiGianTao(), h.getThoiGianThanhToan(), h.getLyDoHuy(), dongs, tts);
+                h.getTongTienThue(), h.getSoLanIn(), h.getThoiGianTao(), h.getThoiGianThanhToan(), h.getLyDoHuy(),
+                dongs, tts, kms);
     }
 }
